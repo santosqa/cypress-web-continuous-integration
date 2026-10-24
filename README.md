@@ -4,7 +4,7 @@
 >Dados aleatórios com: **@faker-js/faker**,
 >Relatórios com: **cypress-mochawesome-reporter**. 
 
-
+---
 
 ---
 ## 🌎 Sobre o autor
