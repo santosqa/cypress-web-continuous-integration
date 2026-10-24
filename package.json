@@ -1,0 +1,20 @@
+{
+  "name": "automacao-web-cypress",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Testes E2E do Automation Exercise",
+  "scripts": {
+    "interface:interativa": "cypress open",
+    "headless": "cypress run",
+    "testar:chrome": "cypress run --browser chrome",
+    "interface": "cypress run --headed",
+    "testar:suite": "cypress run --spec",
+    "verificar:relatorio": "node verificacoes/relatorio-interativo.cjs"
+  },
+  "devDependencies": {
+    "@faker-js/faker": "^8.4.1",
+    "cypress": "^13.7.3",
+    "cypress-mochawesome-reporter": "^3.8.4",
+    "mocha": "10.8.2"
+  }
+}
