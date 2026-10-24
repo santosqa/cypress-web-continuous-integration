@@ -1,0 +1,152 @@
+name: Cypress | Automação Web E2E
+
+on:
+  push:
+    branches:
+      - '**'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  # STEP 1: Executa os testes Cypress ao fazer push ou manualmente
+  testes-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Conferir versão do Node.js
+        run: node --version
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Executar todos os testes Cypress com logs detalhados
+        env:
+          CI: true
+          DEBUG: cypress:*
+        run: npx cypress run
+
+      - name: Salvar relatórios, screenshots e vídeos
+        id: upload-relatorios
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: relatorios
+          path: |
+            cypress/reports
+            cypress/screenshots
+            cypress/videos
+          if-no-files-found: warn
+
+      - name: Exibir resumo dos testes e links
+        if: always()
+        env:
+          ARTIFACT_URL: ${{ steps.upload-relatorios.outputs.artifact-url }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+
+          const reportDirectory = 'cypress/reports/.jsons';
+          const files = fs.existsSync(reportDirectory)
+            ? fs.readdirSync(reportDirectory).filter((file) => file.endsWith('.json'))
+            : [];
+          const totals = { passed: 0, failed: 0, pending: 0, skipped: 0, tests: 0 };
+
+          for (const file of files) {
+            const report = JSON.parse(
+              fs.readFileSync(path.join(reportDirectory, file), 'utf8'),
+            );
+            const stats = report.stats || {};
+            totals.passed += stats.passes || 0;
+            totals.failed += stats.failures || 0;
+            totals.pending += stats.pending || 0;
+            totals.skipped += stats.skipped || 0;
+            totals.tests += stats.testsRegistered
+              || (stats.passes || 0) + (stats.failures || 0) + (stats.pending || 0) + (stats.skipped || 0);
+          }
+
+          const artifactUrl = process.env.ARTIFACT_URL;
+          const runUrl = process.env.RUN_URL;
+          const status = files.length === 0
+            ? '⚠️ SEM RELATÓRIO'
+            : totals.failed === 0
+              ? '✅ SUCESSO'
+              : '❌ FALHA';
+          const reportLine = artifactUrl
+            ? `[Baixar relatório HTML, screenshots e vídeos](${artifactUrl})`
+            : 'Artefato de relatório não foi publicado nesta execução.';
+          const summary = [
+            '## Resultado dos testes Cypress',
+            '',
+            `**${status}**`,
+            ...(files.length === 0
+              ? ['', 'Nenhum JSON de resultados foi encontrado.']
+              : []),
+            '',
+            '| Total | ✅ Passaram | ❌ Falharam | ⏭️ Pendentes | Ignorados |',
+            '| ---: | ---: | ---: | ---: | ---: |',
+            `| ${totals.tests} | ${totals.passed} | ${totals.failed} | ${totals.pending} | ${totals.skipped} |`,
+            '',
+            reportLine,
+            `[Abrir logs desta execução](${runUrl})`,
+            '',
+            'O relatório HTML está em `cypress/reports/index.html` dentro do artefato.',
+          ];
+
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${summary.join('\n')}\n`);
+
+          console.log('');
+          console.log('╔══════════════════════════════════════╗');
+          console.log(`║ RESULTADO CYPRESS: ${status.padEnd(19)}║`);
+          console.log('╠══════════════════════════════════════╣');
+          console.log(`║ Total:       ${String(totals.tests).padEnd(24)}║`);
+          console.log(`║ Passaram:    ${String(totals.passed).padEnd(24)}║`);
+          console.log(`║ Falharam:    ${String(totals.failed).padEnd(24)}║`);
+          console.log(`║ Pendentes:   ${String(totals.pending).padEnd(24)}║`);
+          console.log(`║ Ignorados:   ${String(totals.skipped).padEnd(24)}║`);
+          console.log('╚══════════════════════════════════════╝');
+          console.log(`Relatórios: ${artifactUrl || 'artefato indisponível'}`);
+          console.log(`Execução: ${runUrl}`);
+          if (files.length === 0) {
+            console.log('Aviso: nenhum JSON de resultados foi encontrado.');
+          }
+          NODE
+
+  # STEP 2: Só executa APÓS os testes passarem com sucesso
+  criar-pr-automatico:
+    needs: testes-e2e
+    if: github.ref_name != 'main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      - name: Criar Pull Request via GitHub CLI
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          EXISTING_PR=$(gh pr list --head "${{ github.ref_name }}" --json number -q '.[0].number')
+          if [ -z "$EXISTING_PR" ]; then
+            echo "Testes passaram com sucesso! Criando Pull Request..."
+            gh pr create \
+              --title "Automático: Mergear ${{ github.ref_name }} na main" \
+              --body "Pull Request criado automaticamente pelo GitHub Actions após os testes Cypress passarem com sucesso." \
+              --base main \
+              --head "${{ github.ref_name }}"
+          else
+            echo "Pull Request #${EXISTING_PR} já está aberto para esta branch."
+          fi
